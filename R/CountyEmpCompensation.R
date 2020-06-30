@@ -147,7 +147,4 @@ ComputeCountyCompensation = function(year) {
   return(ratioTable)
 }
 
-write_csv(ComputeCountyCompensation(2019),'../data/County_Compensation_2019.csv')
-
-
 
