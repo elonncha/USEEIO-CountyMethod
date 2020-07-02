@@ -9,16 +9,16 @@ library(tidyverse)
 #' @return A data frame contains state GDP for all counties at a specific year.
 GetCountyGDP = function(year) {
   filename = '../data/extdata/GACounty_GDPbySector.csv'
-  SectorLevelLineCode = c(1,3,6,10,11,12,34,35,36,45,50,59,68,75,82,83)
-  
+  SectorLevelLineCode = c(3,6,10,11,12,34,35,36,45,50,59,68,75,82,83) # sector level and total 
   total = readr::read_csv(filename)
   total = total %>% select(1:4, which(colnames(total) == paste0('gdp',as.character(year))))  # filter by sepecific year
   colnames(total)[5] = 'GDP'
   total = total %>% filter(LineCode %in% SectorLevelLineCode) %>%  # retain only sector-level lines
                     mutate(GDP = as.numeric(GDP) * 1000) # NA if not available
-                    
-  totalCol = total %>% select(-1) %>% spread(GeoName, GDP) %>% relocate(Georgia, .after = Description)
+  totalCol = total %>% select(-1) %>% spread(GeoName, GDP) %>% relocate(Georgia, .after = Description) # transpose the table and put total to the front
   
-    
-  return(total)
+  
+  return(totalCol)
 }
+
+countygdp = GetCountyGDP(2015)

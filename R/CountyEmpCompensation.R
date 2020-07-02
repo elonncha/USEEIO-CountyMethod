@@ -7,11 +7,7 @@ library(tidyverse)
 #' Get GA county FIPS list
 #' @return A data frame contains all 159 names and FIPS for all counties in Georgia
 getGACountyFIPS = function() {
-  CountyCodes = readxl::read_xlsx('../data/extdata/US_geocodes.xlsx') %>% 
-    filter(State =='13') %>% 
-    filter(County !='000') %>%
-    mutate(FIPS = paste0(State,County)) %>%
-    select(Name, FIPS)
+  CountyCodes = readr::read_csv('../data/extdata/GA_County_FIPS.csv')
   return(CountyCodes)
 } 
 
@@ -52,9 +48,6 @@ GetGAEmploymentData = function(year, ownership, ByNAICS) {
   }
     return(GA_NAICS %>% filter(own_code %in% switch_own))
 }
-
-
-
 #' write state-level total Employment data including establishment, employment, and total annual wages at a specific year.
 #' @return void.
 WriteGAEmploymentData = function() {
@@ -65,7 +58,6 @@ WriteGAEmploymentData = function() {
     readr::write_csv(GATotalCompensation, paste0("../data/", filename))
   }
 }
-
 WriteGAEmploymentData()
 
 
@@ -73,29 +65,25 @@ WriteGAEmploymentData()
 #' @param year Integer, A numeric value between 2015-2019 specifying the year of interest
 #' @return A data frame containing data asked for at a specific year.
 GetCountyEstablishmentCount = function(year) {
-  NAICS_Code = readr::read_csv('../data/extdata/QCEWDocumentation/QCEW_industry_titles.csv') %>% 
-    filter(as.numeric(industry_code) >= 100000) %>% 
-    select(industry_code)
+  NAICS2 = c('11','21','22','23','31-33','42','44-45','48-49','51','52','53','54','55','56','61','62','71','72','81', '92')
   GAcountyFIPS = getGACountyFIPS() 
-  CountyTable = data.frame() %>% rbind(NAICS_Code)
-  for (fips in unique(GAcountyFIPS$FIPS)) {
+  CountyTable = data.frame() %>% rbind(as.data.frame(NAICS2))
+  for (fips in unique(GAcountyFIPS$fips)) {
     filename = paste0(fips,'.csv')
     url = paste0('http://www.bls.gov/cew/data/api/', paste0(year, paste0('/a/area/', filename)))
     temp = readr::read_csv(url) %>% 
       select(area_fips, own_code, industry_code, year, annual_avg_estabs) %>%
-      filter(own_code %in% c("1","2","3","5")) %>%
-      filter(as.numeric(industry_code) / 10 ^ 6 <= 1, as.numeric(industry_code) / 10 ^ 6 >= 0.11) %>%
+      filter(own_code %in% c("1","2","3","5"), industry_code %in% NAICS2) %>%
       group_by(industry_code) %>%
-      summarise(annual_avg_establishments = sum(annual_avg_estabs))
-    colnames(temp)[2] = paste0('FIPS/', paste0(fips,paste0("/", GAcountyFIPS[GAcountyFIPS$FIPS == fips,1])))
-    temp = temp %>% right_join(NAICS_Code, by = 'industry_code') 
+      summarise(totalEst = sum(annual_avg_estabs))
+    colnames(temp)[2] = paste0('FIPS/', paste0(fips,paste0("/", GAcountyFIPS[GAcountyFIPS$fips == fips,2])))
+    temp = temp %>% right_join(as.data.frame(NAICS2), by = c('industry_code'='NAICS2')) 
     temp[as.vector(is.na(temp[,2])),2] = 0
-    CountyTable = cbind(CountyTable, as.vector(temp[2])) 
+    CountyTable = CountyTable %>% left_join(., temp, by = c('NAICS2' = 'industry_code'))
   }
   return(CountyTable)
 }
-write_csv(GetCountyEstablishmentCount(2015), "../data/County_TotalEstablishmentCount_2015.csv")
-
+write_csv(GetCountyEstablishmentCount(2018), "../data/County_TotalEstablishmentCount_2018.csv")
 
 #' Compute county-state establishment ratio: county count normalized by state count
 #' @param year Integer, A numeric value between 2015-2019 specifying the year of interest
