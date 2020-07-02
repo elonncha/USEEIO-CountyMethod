@@ -62,7 +62,7 @@ WriteGAEmploymentData()
 
 
 #' Get county-level establishment count 
-#' @param year Integer, A numeric value between 2015-2019 specifying the year of interest
+#' @param year Integer, A numeric value between 2015-2018 specifying the year of interest
 #' @return A data frame containing data asked for at a specific year.
 GetCountyEstablishmentCount = function(year) {
   NAICS2 = c('11','21','22','23','31-33','42','44-45','48-49','51','52','53','54','55','56','61','62','71','72','81', '92')
@@ -83,56 +83,7 @@ GetCountyEstablishmentCount = function(year) {
   }
   return(CountyTable)
 }
-write_csv(GetCountyEstablishmentCount(2018), "../data/County_TotalEstablishmentCount_2018.csv")
-
-#' Compute county-state establishment ratio: county count normalized by state count
-#' @param year Integer, A numeric value between 2015-2019 specifying the year of interest
-#' @return A data frame containing data asked for at a specific year.
-ComputeCountyStateEstablishmentRatio = function(year) {
-  NAICS_Code = readr::read_csv('../data/extdata/QCEWDocumentation/QCEW_industry_titles.csv') %>% 
-    filter(as.numeric(industry_code) >= 100000) %>% 
-    select(industry_code)
-  GAColumn = GetGAEmploymentData(year,'all', TRUE) %>% group_by(industry_code) %>% summarise(total_estabs = sum(annual_avg_estabs)) %>% right_join(NAICS_Code, by = 'industry_code')
-  GAColumn[as.vector(is.na(GAColumn[,2])),2] = 0
-  filename = paste0("../data/County_TotalEstablishmentCount_", paste0(year,'.csv'))
-  CountyTable = readr::read_csv(filename) %>% mutate(industry_code = as.character(industry_code))
-  #row.names(CountyTable) = CountyTable$industry_code
-  CountyTable = cbind(CountyTable, GAColumn[,'total_estabs'])
-  #check consistency of data
-  for (i in 1:nrow(CountyTable)) {
-    if (sum(CountyTable[i,2:(ncol(CountyTable)-1)]) != CountyTable[i,ncol(CountyTable)]) {
-      CountyTable[i,ncol(CountyTable)] = sum(CountyTable[i,2:(ncol(CountyTable)-1)])
-    }
-  }
-  # calculate ratio
-  for (i in 1:nrow(CountyTable)) {
-    if (CountyTable[i,ncol(CountyTable)] != 0){
-      for (obs in 2:(ncol(CountyTable)-1)) {
-        CountyTable[i,obs] = CountyTable[i,obs] / CountyTable[i,ncol(CountyTable)]
-      }
-    }
-  }
-  return(CountyTable)
-}
 
 
-#' Compute county compensation estimation based on county-state establishment ratio
-#' @param year Integer, A numeric value between 2015-2019 specifying the year of interest
-#' @return A data frame containing data asked for at a specific year.
-ComputeCountyCompensation = function(year) {
-  GAColumn = GetGAEmploymentData(year,'all', TRUE) %>% 
-    group_by(industry_code) %>% 
-    summarise(total_comp = sum(total_annual_wages)) %>% 
-    right_join(NAICS_Code, by = 'industry_code')
-  GAColumn[is.na(GAColumn)] = 0
-  ratioTable = ComputeCountyStateEstablishmentRatio(year) %>% cbind(., GAColumn['total_comp'])
-  
-  for (row in 1:nrow(ratioTable)) {
-    for (county in 2:(ncol(ratioTable)-2)) {
-      ratioTable[row,county] = ratioTable[row,county] * ratioTable[row,ncol(ratioTable)]
-    }
-  }
-  return(ratioTable)
-}
 
 
