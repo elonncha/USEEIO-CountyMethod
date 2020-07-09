@@ -10,12 +10,12 @@ library(tidyverse)
 #' @param axis A numeric value, 0,1. if 0, each geographical unit will be a col, if 1, row
 #' @return A data frame contains selected county GDP by BEA sector industries at a specific year.
 GetCountyOriginalGDP = function(year, county, axis) {
-  filename = '../data/extdata/GACounty_GDPbySector.csv'
+  filename = '../data/extdata/CAGDP2_GA_2001_2018.csv'
   SectorLevelLineCode = c(3,6,10,11,12,34,35,36,45,50,59,68,75,82,83) # sector level and total 
   total = readr::read_csv(filename) %>% filter(!is.na(LineCode))
   colnum = which(colnames(total) == paste0('gdp',as.character(year)))
   
-  total = total %>% select(2:3, which(colnames(total) == paste0('gdp',as.character(year)))) %>% filter(LineCode %in% SectorLevelLineCode) # filter by sepecific year
+  total = total %>% select(2,5, which(colnames(total) == paste0('gdp',as.character(year)))) %>% filter(LineCode %in% SectorLevelLineCode) # filter by sepecific year
   colnames(total)[ncol(total)] = 'GDP'
   if (county == 'all'){
     total = total %>%  # retain only sector-level lines
@@ -38,13 +38,13 @@ GetCountyOriginalGDP = function(year, county, axis) {
 #' @return A data frame containing data asked for at a specific year.
 EstimateCountyGDP = function(year) {
   # CrossWalk to BEA sector
-  cw = readr::read_csv('../data/extdata/CrossWalk_NAICS2ToBEASector.csv')
+  cw = readr::read_csv('../data/extdata/CrossWalk_NAICS2ToLineCode.csv')
   filename = paste0("../data/GACounty_estabs_", paste0(year,'.csv'))
   CountyCount = readr::read_csv(filename) %>% 
     select(-1) %>%
     right_join(., cw, by = 'NAICS2') %>% 
-    relocate(BEASector,.after = NAICS2) %>% 
-    group_by(BEASector) %>%
+    relocate(LineCode,.after = NAICS2) %>% 
+    group_by(LineCode) %>%
     summarise_if(is.numeric, sum)
 
   # Obtain Total GDP of each Sector
@@ -70,9 +70,9 @@ EstimateCountyGDP = function(year) {
   }
 
   # 2. compared total estimation with county total, then apply shrinkage factor to each county to shrink est total to true total
-  trueSum = readr::read_csv('../data/extdata/GACounty_GDPbySector.csv') 
+  trueSum = readr::read_csv('../data/extdata/CAGDP2_GA_2001_2018.csv') 
   trueSum = trueSum %>% 
-    filter(LineCode  == 1, GeoFips != 13000) %>%
+    filter(LineCode  == 1, GeoName != 'Georgia') %>%
     select(2, which(colnames(trueSum) == paste0('gdp',as.character(year))))
   colnames(trueSum)[2] = 'trueSum'
   for (col in 1:ncol(CountyGDP)) {
@@ -111,6 +111,3 @@ ShowEstimationAccuracy = function(year) {
   ColumnErrorTable['errorRate'] = abs(ColumnErrorTable$dif) / ColumnErrorTable$trueSum
   return(ColumnErrorTable)
 }
-
-
-col = ShowEstimationAccuracy(2015)
