@@ -2,6 +2,30 @@ if (!require(useeior)) { githubinstall::githubinstall('USEPA/useeior', ref='stat
 if (!require(tidyverse)) { install.packages(tidyverse) }
 library(useeior)
 library(tidyverse)
+source('CrosswalkGenerator.R')
+source('CountyEmployment.R')
+
+GetGeorgiaSummarySectorGDPRatio = function(year) {
+  load("../data/extdata/State_GDP_2007_2019.rda")
+  cw = unique(readr::read_csv('../data/extdata/Crosswalk_CountyGDPtoBEASummaryIO2012Schema.csv') %>% select(1:4))
+  sector_linecode = unique(cw$LineCodeSec)
+  summary_linecode = unique(cw$LineCodeSum)
+  
+  GA_GDP = State_GDP_2007_2019 %>% 
+    filter(GeoName == 'Georgia') %>%
+    select(2,3,year - 2003) %>%
+    filter(LineCode %in% combine(sector_linecode, summary_linecode)) %>% 
+    left_join(., cw, by = c('LineCode' = 'LineCodeSum')) %>%
+    mutate(GDPRatio = 0)
+  
+  for (i in 1:nrow(GA_GDP)) {
+    if (!is.na(GA_GDP$LineCodeSec[i])) {
+      GA_GDP$GDPRatio[i] = GA_GDP$'2017'[i] / GA_GDP$'2017'[which(GA_GDP$LineCode==GA_GDP$LineCodeSec[i])]
+    }
+  }
+  GA_GDP$GDPRatio[is.na(GA_GDP$LineCodeSec)] = 1.0
+  return(GA_GDP %>% select(-6) %>% na.omit())
+}
 
 
 #' Get sector-level GDP for all counties at a specific year.
@@ -9,8 +33,8 @@ library(tidyverse)
 #' @param county A string character specifying the county of interest, or 'all' for all data
 #' @param axis A numeric value, 0,1. if 0, each geographical unit will be a col, if 1, row
 #' @return A data frame contains selected county GDP by BEA sector industries at a specific year.
-GetCountyOriginalGDP = function(year, county, axis) {
-  filename = '../data/extdata/CAGDP2_GA_2001_2018.csv'
+GetCountyOriginalSectorGDP = function(year, county, axis) {
+  filename = '../data/extdata/BEA_County/CAGDP2_GA_2001_2018.csv'
   SectorLevelLineCode = c(3,6,10,11,12,34,35,36,45,50,59,68,75,82,83) # sector level and total 
   total = readr::read_csv(filename) %>% filter(!is.na(LineCode))
   colnum = which(colnames(total) == paste0('gdp',as.character(year)))
@@ -33,51 +57,50 @@ GetCountyOriginalGDP = function(year, county, axis) {
   }
 }
 
-#' Make estimation of blank rows from what GetCountyOriginalGDP returned by county-state establishment ratio
+
+#' Make estimation of blank rows from what GetCountyOriginalSectorGDP returned by county-state establishment ratio
 #' @param year Integer, A numeric value between 2015-2018 specifying the year of interest
 #' @return A data frame containing data asked for at a specific year.
-EstimateCountyGDP = function(year) {
+EstimateCountySectorGDP = function(year) {
   # CrossWalk to BEA sector
   cw = readr::read_csv('../data/extdata/CrossWalk_NAICS2ToLineCode.csv')
   filename = paste0("../data/GACounty_estabs_", paste0(year,'.csv'))
-  CountyCount = readr::read_csv(filename) %>% 
+  CountyEstabCount = readr::read_csv(filename) %>% 
     select(-1) %>%
     right_join(., cw, by = 'NAICS2') %>% 
     relocate(LineCode,.after = NAICS2) %>% 
     group_by(LineCode) %>%
     summarise_if(is.numeric, sum)
-
-  # Obtain Total GDP of each Sector
-  GAColumn = GetCountyOriginalGDP(year, 'all', 0) %>% select(2)
   
   # Calculate GDP difference of each Sector
-  RawGDP = GetCountyOriginalGDP(year, 'all', 0) %>% select(-1,-2)
+  RawGDP = GetCountyOriginalSectorGDP(year, 'all', 0) %>% select(-1)
   RawGDP[is.na(RawGDP)] = 0
-  GDPDifference = GAColumn$Georgia - rowSums(RawGDP)
+  GDPRowDifference = RawGDP$Georgia - rowSums(RawGDP[,2:ncol(RawGDP)])
+  GDPRowDifference[abs(GDPRowDifference)<=2000] = 0
   
   # Replace NA by Estimated GDP
   # 1. estimate by county/state raio for each industry
-  OriGDP = GetCountyOriginalGDP(year, 'all', 0) %>% select(-1,-2)
-  CountyGDP = GetCountyOriginalGDP(year, 'all', 0) %>% select(-1,-2)
+  CountyGDP = GetCountyOriginalSectorGDP(year, 'all', 0) %>% select(-1,-2)
   for (row in 1:(nrow(CountyGDP))) {
     key = which(is.na(CountyGDP[row,]))
-    if (length(key) != 0 && sum(CountyCount[row,key]) != 0) {
-      ratio = CountyCount[row,key] / sum(CountyCount[row,key])
-      CountyGDP[row,key] = ratio * GDPDifference[row]
-    } else if (length(key) != 0 && sum(CountyCount[row,key]) == 0) {
-      CountyGDP[row,key] = GDPDifference[row] / length(key)
+    if (length(key) != 0 && sum(CountyEstabCount[row,key]) != 0) {
+      ratio = CountyEstabCount[row,key] / sum(CountyEstabCount[row,key])
+      CountyGDP[row,key] = ratio * GDPRowDifference[row]
+    } else if (length(key) != 0 && sum(CountyEstabCount[row,key]) == 0) {
+      CountyGDP[row,key] = GDPRowDifference[row] / length(key)
     }
   }
 
   # 2. compared total estimation with county total, then apply shrinkage factor to each county to shrink est total to true total
-  trueSum = readr::read_csv('../data/extdata/CAGDP2_GA_2001_2018.csv') 
-  trueSum = trueSum %>% 
+  OriGDP = GetCountyOriginalSectorGDP(year, 'all', 0) %>% select(-1,-2)
+  countySum = readr::read_csv('../data/extdata/BEA_County/CAGDP2_GA_2001_2018.csv') 
+  countySum = countySum %>% 
     filter(LineCode  == 1, GeoName != 'Georgia') %>%
-    select(2, which(colnames(trueSum) == paste0('gdp',as.character(year))))
-  colnames(trueSum)[2] = 'trueSum'
+    select(2, which(colnames(countySum) == paste0('gdp',as.character(year)))) %>% arrange(GeoName)
+  colnames(countySum)[2] = 'countySum'
   for (col in 1:ncol(CountyGDP)) {
     estTotal = sum(CountyGDP[,col])
-    trueTotal = as.numeric(trueSum$trueSum[col]) * 1000
+    trueTotal = as.numeric(countySum$countySum[col]) * 1000
     dif = estTotal - trueTotal
     errorRate = abs(dif) / trueTotal
     key = which(is.na(OriGDP[,col]))
@@ -88,26 +111,28 @@ EstimateCountyGDP = function(year) {
   }
   CountyGDP[is.na(CountyGDP)] = 0
   # Add back original Column to the table
-  CountyGDP = cbind(GetCountyOriginalGDP(year, 'all', 0) %>% select(1), CountyGDP)
+  CountyGDP = cbind(GetCountyOriginalSectorGDP(year, 'all', 0) %>% select(1), CountyGDP)
   return(CountyGDP)
 }
 
-#' Check accuracy of County GDP Estimation
-#' @param year Integer, A numeric value between 2015-2018 specifying the year of interest
+
+#' Break down sector-level GDP into summary-level GDP
+#' @param year Integer, A numeric value between 2015-2017 specifying the year of interest
 #' @return two data frames containing data asked for at a specific year: Column Error, Row Error
-ShowEstimationAccuracy = function(year) {
-  estTable = EstimateCountyGDP(year) 
-  estTable = estTable %>% select(-1)
-  # Column Error(county total)
-  estSum = colSums(estTable)
-  trueSum = readr::read_csv('../data/extdata/GACounty_GDPbySector.csv') 
-  trueSum = trueSum %>% 
-    filter(LineCode  == 1, GeoFips != 13000) %>%
-    select(2, which(colnames(trueSum) == paste0('gdp',as.character(year))))
-  colnames(trueSum)[2] = 'trueSum'
-  ColumnErrorTable = trueSum %>% mutate(trueSum = as.numeric(trueSum) * 1000)
-  ColumnErrorTable['estSum'] = estSum
-  ColumnErrorTable['dif'] = ColumnErrorTable$estSum - ColumnErrorTable$trueSum
-  ColumnErrorTable['errorRate'] = abs(ColumnErrorTable$dif) / ColumnErrorTable$trueSum
-  return(ColumnErrorTable)
+EstimateCountySummaryGDP = function(year) {
+  ratio = GetGeorgiaSummarySectorGDPRatio(year)
+  sectorGDP = EstimateCountySectorGDP(year)
+  summaryGDP = data.frame(LineCode = unique(ratio$LineCode))
+  
+  for (c in 2:ncol(sectorGDP)) {
+    summaryGDP$newcol = 0
+    colnames(summaryGDP)[c] = colnames(sectorGDP)[c]
+    for (i in 1:nrow(summaryGDP)) {
+      summaryGDP[i,c] = sectorGDP[sectorGDP$LineCode == ratio$LineCodeSec[which(ratio$LineCode == summaryGDP$LineCode[i])], c] * ratio$GDPRatio[which(ratio$LineCode == summaryGDP$LineCode[i])]
+    }
+  }
+  
+  ##TODO: specialty of counties (estabs?)
+  return(summaryGDP)
 }
+
