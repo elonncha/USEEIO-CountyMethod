@@ -27,7 +27,6 @@ GetGeorgiaSummarySectorGDPRatio = function(year) {
   return(GA_GDP %>% select(-6) %>% na.omit())
 }
 
-
 #' Get sector-level GDP for all counties at a specific year.
 #' @param year A numeric value between 2007 and 2018 specifying the year of interest.
 #' @param county A string character specifying the county of interest, or 'all' for all data
@@ -43,7 +42,7 @@ GetCountyOriginalSectorGDP = function(year, county, axis) {
   colnames(total)[ncol(total)] = 'GDP'
   if (county == 'all'){
     total = total %>%  # retain only sector-level lines
-      mutate(GDP = as.numeric(GDP) * 1000) # NA if not available
+      mutate(GDP = as.numeric(GDP) * 1000) %>% arrange(GeoName)# NA if not available
     totalCol = total %>% spread(GeoName, GDP) %>% relocate(Georgia, .after = LineCode) # transpose the table and put total to the front
     if (axis == 0){return(totalCol)} else if (axis ==1) {return(total)}
     
@@ -56,7 +55,6 @@ GetCountyOriginalSectorGDP = function(year, county, axis) {
     if (axis == 0){return(totalCol)} else if (axis ==1) {return(total)}
   }
 }
-
 
 #' Make estimation of blank rows from what GetCountyOriginalSectorGDP returned by county-state establishment ratio
 #' @param year Integer, A numeric value between 2015-2018 specifying the year of interest
@@ -115,24 +113,51 @@ EstimateCountySectorGDP = function(year) {
   return(CountyGDP)
 }
 
-
-#' Break down sector-level GDP into summary-level GDP
+#' Break down sector-level GDP into summary-level GDP by state ratio
 #' @param year Integer, A numeric value between 2015-2017 specifying the year of interest
 #' @return two data frames containing data asked for at a specific year: Column Error, Row Error
 EstimateCountySummaryGDP = function(year) {
-  ratio = GetGeorgiaSummarySectorGDPRatio(year)
+  
+  ## step1: initial ratio
+  rawratio = GetGeorgiaSummarySectorGDPRatio(year) %>% select(1,4,6)
   sectorGDP = EstimateCountySectorGDP(year)
-  summaryGDP = data.frame(LineCode = unique(ratio$LineCode))
+  summaryGDP = data.frame(LineCode = unique(rawratio$LineCode))
   
+  
+  LQ = ComputeEstabLocationQuotient(year)
   for (c in 2:ncol(sectorGDP)) {
-    summaryGDP$newcol = 0
-    colnames(summaryGDP)[c] = colnames(sectorGDP)[c]
-    for (i in 1:nrow(summaryGDP)) {
-      summaryGDP[i,c] = sectorGDP[sectorGDP$LineCode == ratio$LineCodeSec[which(ratio$LineCode == summaryGDP$LineCode[i])], c] * ratio$GDPRatio[which(ratio$LineCode == summaryGDP$LineCode[i])]
+    countysector = sectorGDP %>% select(1,c) %>% right_join(.,rawratio, by = c('LineCode'='LineCodeSec'))
+    colnames(countysector)[3] = 'LineCodeSum'
+    countyLQ = LQ %>% select(1,c)
+    colnames(countyLQ)[2] = "LQ"
+    county = countysector %>% left_join(., countyLQ, by = 'LineCodeSum') %>% mutate(weightedRatio = 0, normalizedRatio = 0, adjusted = 0)
+    
+    for (sec in unique(county$LineCode)) {
+      sumcodelist = unique(county[county$LineCode == sec,]$LineCodeSum)
+      totalLQ = sum(county[county$LineCode == sec,]$LQ)
+      if (totalLQ == 0) {
+        next
+      } else {
+        for (sum in sumcodelist) {
+          county[county$LineCodeSum == sum,]$weightedRatio = county[county$LineCodeSum == sum,]$GDPRatio * (county[county$LineCodeSum == sum,]$LQ / totalLQ)
+        }
+        for (sum in sumcodelist) {
+          county[county$LineCodeSum == sum,]$normalizedRatio = county[county$LineCodeSum == sum,]$weightedRatio / sum (county[county$LineCode == sec,]$weightedRatio)
+        }
+        
+      }
+      
     }
+    
+    county$adjusted = county[2] * county$normalizedRatio
+    county[2] = county[8]
+    summaryGDP = cbind(summaryGDP, county[2])
   }
-  
-  ##TODO: specialty of counties (estabs?)
+
   return(summaryGDP)
+
 }
+
+
+
 

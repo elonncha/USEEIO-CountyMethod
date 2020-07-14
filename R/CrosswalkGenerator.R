@@ -25,12 +25,6 @@ getCrosswalk = function(start, end) {
   raw = readr::read_csv('../data/extdata/Crosswalk_MasterCrosswalk.csv') %>% 
     select(start_switch, end_switch) 
   CW = unique(na.omit(raw))
+  return(CW)
 }
 
-
-cw2 = readr::read_csv('../data/extdata/Crosswalk_MasterCrosswalk.csv') %>% 
-  select(3,4, 13, 14) %>% na.omit() 
-colnames(cw2)[3] = 'NAICS'
-
-cw2 = cw2 %>% filter(NAICS >=100, NAICS < 1000)
-cw2 = unique(cw2)

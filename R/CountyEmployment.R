@@ -2,6 +2,7 @@ if (!require(useeior)) { githubinstall::githubinstall('USEPA/useeior', ref='stat
 if (!require(tidyverse)) { install.packages(tidyverse) }
 library(useeior)
 library(tidyverse)
+source('CrosswalkGenerator.R')
 
 #' Get GA county FIPS list
 #' @return A data frame contains all 159 names and FIPS for all counties in Georgia
@@ -10,11 +11,12 @@ getGACountyFIPS = function() {
   return(CountyCodes)
 } 
 
-#' Get state-level total Employment data including establishment, employment, and total annual wages at a specific year.
+#' Get state-level total Employment data including establishment, employment, and total annual wages at a specific year. 
 #' @param year Integer, A numeric value between 2015-2019 specifying the year of interest
 #' @param ownership Character, A character string specifying the ownership title. "all" "private" "localgov" "stategov" "federalgov" 
 #' @param ByNAICS Boolean, A boolean value that takes the value of "TRUE" if you need to obtain break-down table 
 #' @return A list of data frames containing data asked for at a specific year.
+#' @details NOT IN USE, ABANDONED
 GetGAEmploymentData = function(year, ownership, ByNAICS) {
   switch_own = switch(ownership, "all" = c("0","1","2","3","5"), "private" = "5", "localgov" = "3", "stategov" = "2", "federalgov" = "1")
   #aggregated table
@@ -66,8 +68,8 @@ GetCountyEmploymentData = function(year, type) {
   
   # loop through all counties in GA
   for (fips in unique(GAcountyFIPS$fips)) {
-    filename = paste0(GAcountyFIPS[GAcountyFIPS$fips == fips,]$Name,paste0(yr,'.csv'))
-    url = paste0('../data/extdata/QCEWCountyEmp/', paste0(paste0(yr,"/"), filename))
+    filename = paste0(GAcountyFIPS[GAcountyFIPS$fips == fips,]$Name,paste0(year,'.csv'))
+    url = paste0('../data/extdata/QCEW_County_Emp/', paste0(paste0(year,"/"), filename))
     countyraw = readr::read_csv(url) 
     countytotal = countyraw %>% filter(own_code == '0') %>% select(annual_avg_estabs, annual_avg_emplvl, total_annual_wages) 
     countydetail = countyraw %>% 
@@ -130,3 +132,58 @@ GetCountyEmploymentData = function(year, type) {
   return(CountyTable)
 }
 
+
+#' Get county-level estab data at BEA summary level: an update of GetCountyEmploymentData
+#' @param year Integer, A numeric value between 2015-2018 specifying the year of interest
+#' @return A data frame containing data asked for at a specific year.
+ComputeEstabLocationQuotient = function(year) {
+  CW = getCrosswalk('bea_summary','naics')
+  colnames(CW) = c('BEA','BEA_DES','NAICS','NAICS_DES')
+  CW = CW %>% filter(NAICS >= 1e+5)
+  CW2 = readr::read_csv('../data/extdata/Crosswalk_CountyGDPtoBEASummaryIO2012Schema.csv')
+  GAcountyFIPS = getGACountyFIPS() 
+  GAcountyName = sort(GAcountyFIPS$Name)
+  
+  for (name in GAcountyName) {
+    filename = paste0(name,paste0(year,'.csv'))
+    url = paste0('../data/extdata/QCEW_County_Emp/', paste0(paste0(year,"/"), filename))
+    countyraw = readr::read_csv(url) 
+    countydetail = countyraw %>% 
+      select(area_fips, own_code, industry_code, year, annual_avg_estabs) %>%
+      mutate(industry_code = as.numeric(industry_code)) %>%
+      filter(own_code %in% c("1","2","3","5"), industry_code >= 1e+5) %>%
+      group_by(industry_code) %>% summarise(estab = sum(annual_avg_estabs))
+    colnames(countydetail)[2] = paste0(name, ', GA')
+    CW = CW %>% left_join(., countydetail, by = c('NAICS' = 'industry_code'))
+    CW[is.na(CW)] = 0
+    
+  }
+  
+  CountyEstab = CW %>% 
+    group_by(BEA,BEA_DES) %>% 
+    summarise_if(is.numeric, sum) %>% 
+    select(-3) %>% 
+    full_join(.,CW2, by = c('BEA'= 'BEA_2012_Summary_Code')) %>%
+    relocate(LineCodeSec, DescriptionSec, LineCodeSum, DescriptionSum, BEA_2012_Summary_Name, .after = BEA_DES) %>%
+    select(-2,-4,-7) %>% arrange(LineCodeSum) %>% mutate(LineCodeSec = as.character(LineCodeSec))
+  CountyEstab = CountyEstab[!is.na(CountyEstab$LineCodeSec),]
+  CountyEstab[is.na(CountyEstab)] = 0
+  CountyEstab  = CountyEstab %>% group_by(LineCodeSum) %>% summarise_if(is.numeric, sum)
+  
+  CountyLQ = CountyEstab
+  
+  CountyTotal = colSums(CountyLQ[,2:ncol(CountyLQ)])
+  GATotal = sum(CountyTotal)
+  for (row in (1:nrow(CountyLQ))) {
+    GAIndtotal = sum(CountyLQ[row,2:ncol(CountyLQ)])
+    for (col in (2:ncol(CountyLQ))) {
+      if (GAIndtotal ==0) {
+        CountyLQ[row,col] = 0
+      } else {
+        CountyLQ[row,col] = (CountyLQ[row,col] / CountyTotal[col-1]) / (GAIndtotal / GATotal)
+      }
+    }
+  }
+    
+  return(CountyLQ)
+}
