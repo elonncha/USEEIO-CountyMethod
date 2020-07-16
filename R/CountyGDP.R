@@ -4,6 +4,8 @@ library(useeior)
 library(tidyverse)
 source('CrosswalkGenerator.R')
 source('CountyEmployment.R')
+source('../../stateio/R/UtilityFunctions.R')
+
 
 GetGeorgiaSummarySectorGDPRatio = function(year) {
   load("../data/extdata/State_GDP_2007_2019.rda")
@@ -17,10 +19,11 @@ GetGeorgiaSummarySectorGDPRatio = function(year) {
     filter(LineCode %in% combine(sector_linecode, summary_linecode)) %>% 
     left_join(., cw, by = c('LineCode' = 'LineCodeSum')) %>%
     mutate(GDPRatio = 0)
+  colnames(GA_GDP)[3] = 'GDP'
   
   for (i in 1:nrow(GA_GDP)) {
     if (!is.na(GA_GDP$LineCodeSec[i])) {
-      GA_GDP$GDPRatio[i] = GA_GDP$'2017'[i] / GA_GDP$'2017'[which(GA_GDP$LineCode==GA_GDP$LineCodeSec[i])]
+      GA_GDP$GDPRatio[i] = GA_GDP$GDP[i] / GA_GDP$GDP[which(GA_GDP$LineCode==GA_GDP$LineCodeSec[i])]
     }
   }
   GA_GDP$GDPRatio[is.na(GA_GDP$LineCodeSec)] = 1.0
@@ -56,6 +59,7 @@ GetCountyOriginalSectorGDP = function(year, county, axis) {
   }
 }
 
+
 #' Make estimation of blank rows from what GetCountyOriginalSectorGDP returned by county-state establishment ratio
 #' @param year Integer, A numeric value between 2015-2018 specifying the year of interest
 #' @return A data frame containing data asked for at a specific year.
@@ -76,9 +80,20 @@ EstimateCountySectorGDP = function(year) {
   GDPRowDifference = RawGDP$Georgia - rowSums(RawGDP[,2:ncol(RawGDP)])
   GDPRowDifference[abs(GDPRowDifference)<=2000] = 0
   
+  filename2 = '../data/extdata/BEA_County/CAGDP2_GA_2001_2018.csv'
+  SectorLevelLineCode = c(3,6,10,11,12,34,35,36,45,50,59,68,75,82,83) # sector level and total 
+  t_cs = readr::read_csv(filename2) %>% 
+    filter(!is.na(LineCode)) %>% 
+    filter(LineCode == 1, GeoName != 'Georgia') %>% 
+    arrange(GeoName) %>% select(year - (2001-9))
+  colnames(t_cs)[1] = 'countyGDP'
+  t_cs = as.numeric(t_cs$countyGDP) * 1000
+  GDPColDifference = t_cs - colSums(RawGDP[,2:ncol(RawGDP)])
+  
   # Replace NA by Estimated GDP
   # 1. estimate by county/state raio for each industry
   CountyGDP = GetCountyOriginalSectorGDP(year, 'all', 0) %>% select(-1,-2)
+  matrixKEY = is.na(CountyGDP)
   for (row in 1:(nrow(CountyGDP))) {
     key = which(is.na(CountyGDP[row,]))
     if (length(key) != 0 && sum(CountyEstabCount[row,key]) != 0) {
@@ -89,40 +104,47 @@ EstimateCountySectorGDP = function(year) {
     }
   }
 
-  # 2. compared total estimation with county total, then apply shrinkage factor to each county to shrink est total to true total
-  OriGDP = GetCountyOriginalSectorGDP(year, 'all', 0) %>% select(-1,-2)
-  countySum = readr::read_csv('../data/extdata/BEA_County/CAGDP2_GA_2001_2018.csv') 
-  countySum = countySum %>% 
-    filter(LineCode  == 1, GeoName != 'Georgia') %>%
-    select(2, which(colnames(countySum) == paste0('gdp',as.character(year)))) %>% arrange(GeoName)
-  colnames(countySum)[2] = 'countySum'
-  for (col in 1:ncol(CountyGDP)) {
-    estTotal = sum(CountyGDP[,col])
-    trueTotal = as.numeric(countySum$countySum[col]) * 1000
-    dif = estTotal - trueTotal
-    errorRate = abs(dif) / trueTotal
-    key = which(is.na(OriGDP[,col]))
-    if (length(key) != 0) {
-      shrinkFactor = dif / sum(CountyGDP[key,col])
-      CountyGDP[key,col] = CountyGDP[key,col] * (1 - shrinkFactor)
+  # 2. RAS for data reconciliation
+  M0 = CountyGDP
+  for (row in (1:nrow(M0))) {
+    for (col in (1:ncol(M0))) {
+      if (matrixKEY[row,col] == TRUE) {
+        M0[row,col] = M0[row,col]
+      } else if (matrixKEY[row,col] == FALSE){
+        M0[row,col] = 0
+      }
     }
   }
-  CountyGDP[is.na(CountyGDP)] = 0
+  M1 = applyRAS(as.matrix(M0), GDPRowDifference, GDPColDifference, relative_diff = NULL, absolute_diff = 0, max_itr = 100000)
+  
+  for (row in 1:(nrow(CountyGDP))) {
+    for (col in (1:ncol(CountyGDP))) {
+      if (matrixKEY[row,col] == TRUE) {
+        CountyGDP[row,col] = M1[row,col]
+      } else if (matrixKEY[row,col] == FALSE) {
+        next
+      }
+    }
+  }
+
   # Add back original Column to the table
   CountyGDP = cbind(GetCountyOriginalSectorGDP(year, 'all', 0) %>% select(1), CountyGDP)
   return(CountyGDP)
 }
 
+#gdp = EstimateCountySectorGDP(2016)
+
+
 #' Break down sector-level GDP into summary-level GDP by state ratio
 #' @param year Integer, A numeric value between 2015-2017 specifying the year of interest
+#' @param ite Integer, times of iteration for RAS data reconciliation, 10000 as default
 #' @return two data frames containing data asked for at a specific year: Column Error, Row Error
-EstimateCountySummaryGDP = function(year) {
+EstimateCountySummaryGDP = function(year, ite = 10000) {
   
-  ## step1: initial ratio
+  ## step1: initial allocation based on LQ-weighted gdp ratio
   rawratio = GetGeorgiaSummarySectorGDPRatio(year) %>% select(1,4,6)
   sectorGDP = EstimateCountySectorGDP(year)
   summaryGDP = data.frame(LineCode = unique(rawratio$LineCode))
-  
   
   LQ = ComputeEstabLocationQuotient(year)
   for (c in 2:ncol(sectorGDP)) {
@@ -135,28 +157,57 @@ EstimateCountySummaryGDP = function(year) {
     for (sec in unique(county$LineCode)) {
       sumcodelist = unique(county[county$LineCode == sec,]$LineCodeSum)
       totalLQ = sum(county[county$LineCode == sec,]$LQ)
-      if (totalLQ == 0) {
-        next
-      } else {
+      if (totalLQ == 0) { next } else {
         for (sum in sumcodelist) {
           county[county$LineCodeSum == sum,]$weightedRatio = county[county$LineCodeSum == sum,]$GDPRatio * (county[county$LineCodeSum == sum,]$LQ / totalLQ)
         }
         for (sum in sumcodelist) {
           county[county$LineCodeSum == sum,]$normalizedRatio = county[county$LineCodeSum == sum,]$weightedRatio / sum (county[county$LineCode == sec,]$weightedRatio)
         }
-        
       }
-      
     }
     
+    # compute new gdp ratio
     county$adjusted = county[2] * county$normalizedRatio
+    # obtain original ratio for gov spending back becasue 85 is missing
+    county[county$LineCode =='83',]$adjusted = as.numeric(county[county$LineCode =='83',][2,2]) * county[county$LineCode =='83',]$GDPRatio
     county[2] = county[8]
     summaryGDP = cbind(summaryGDP, county[2])
   }
+  
+  
+  ### step2: RAS method to reconcile matrix TO BE CONTINUE!!! (RAS based on sector)
+  M0 = as.matrix(summaryGDP %>% select(-1))
+  
+  t_rs = State_GDP_2007_2019 %>% filter(GeoName == 'Georgia', LineCode %in% gdp2015$LineCode) %>% select(year - 2003)
+  colnames(t_rs)[1] = 'sectorGDP'
+  t_rs = t_rs$sectorGDP
+  
+  filename = '../data/extdata/BEA_County/CAGDP2_GA_2001_2018.csv'
+  SectorLevelLineCode = c(3,6,10,11,12,34,35,36,45,50,59,68,75,82,83) # sector level and total 
+  t_cs = readr::read_csv(filename) %>% 
+    filter(!is.na(LineCode)) %>% 
+    filter(LineCode == 1, GeoName != 'Georgia') %>% 
+    arrange(GeoName) %>% select(year - (2001-9))
+  colnames(t_cs)[1] = 'countyGDP'
+  t_cs = as.numeric(t_cs$countyGDP) * 1000
+  
+  M1 = applyRAS(M0, t_rs, t_cs, relative_diff = NULL, absolute_diff = 0, max_itr = ite)
 
   return(summaryGDP)
 
 }
+
+
+gdp2015 = EstimateCountySummaryGDP(2015)
+
+
+origdp2015 = GetCountyOriginalSectorGDP(2015, 'all', 0)
+
+
+
+
+
 
 
 

@@ -114,9 +114,6 @@ for state in stateCode[10:11]:  #loop through all states
 
 
 
-
-
-
 ### test
 search_url2 = '/api/v2/search/spending_by_award/'
 startDate = '2012-01-01' # manual time setting
@@ -139,7 +136,6 @@ for id in testNAICS:  #loop through all NAICS sectors
     for type in AwardTypesObject[0:1]:
         i = 0
         for psc in psclist:
-
             NAICSCodeObject = {'require':[str(id)]}
             PSCCodeObject = {'require': [psc]}
             filterObject = {'time_period': [TimePeriodObject],
@@ -149,7 +145,7 @@ for id in testNAICS:  #loop through all NAICS sectors
                         'psc_codes': PSCCodeObject
                         } #filterObject
             apiData = {'filters': filterObject,
-                "fields": ["Award ID","Recipient Name","Start Date","End Date","Award Amount","Awarding Agency","Contract Award Type", "Place of Performance State Code","Place of Performance Zip5"],
+                "fields": ["Award ID", "Recipient Name", "Start Date", "End Date", "Award Amount", "Awarding Agency", "Contract Award Type", "Place of Performance State Code", "Place of Performance Zip5"],
                 'limit': 100,
                 'page': 1}
             response = apiCall(base_url + search_url2, method = 'POST', filter = apiData)
