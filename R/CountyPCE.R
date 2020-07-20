@@ -1,4 +1,4 @@
-if (!require(useeior)) { githubinstall::githubinstall('USEPA/useeior', ref='state_2r') }
+
 if (!require(tidyverse)) { install.packages(tidyverse) }
 library(useeior)
 library(tidyverse)
@@ -13,7 +13,7 @@ GetCountyPCERatio = function(year) {
   PCERatio = PC %>% 
     filter(LineCode == 10, GeoName != 'Georgia') %>% 
     mutate(PCI = as.numeric(PCI) * 1000, PCERatio = PCI / sum(PCI)) %>%
-    select(1,2,6,7)
+    select(1,2,6,7) %>% arrange(GeoName)
   return(PCERatio)
 }
 

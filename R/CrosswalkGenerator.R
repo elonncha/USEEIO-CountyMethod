@@ -1,6 +1,4 @@
-if (!require(useeior)) { githubinstall::githubinstall('USEPA/useeior', ref='state_2r') }
 if (!require(tidyverse)) { install.packages(tidyverse) }
-library(useeior)
 library(tidyverse)
 
 

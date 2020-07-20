@@ -201,7 +201,6 @@ EstimateCountySummaryGDP = function(year, ite = 10000) {
 
 gdp2015 = EstimateCountySummaryGDP(2015)
 
-
 origdp2015 = GetCountyOriginalSectorGDP(2015, 'all', 0)
 
 

@@ -1,70 +1,49 @@
-if (!require(useeior)) { githubinstall::githubinstall('USEPA/useeior', ref='state_2r') }
-if (!require(tidyverse)) { install.packages(tidyverse) }
-library(useeior)
 library(tidyverse)
 source('CrosswalkGenerator.R')
+source('supporter.R')
 
-#' Get GA county FIPS list
-#' @return A data frame contains all 159 names and FIPS for all counties in Georgia
-getGACountyFIPS = function() {
-  CountyCodes = readr::read_csv('../data/extdata/GA_County_FIPS.csv')
-  return(CountyCodes)
-} 
-
-#' Get state-level total Employment data including establishment, employment, and total annual wages at a specific year. 
-#' @param year Integer, A numeric value between 2015-2019 specifying the year of interest
-#' @param ownership Character, A character string specifying the ownership title. "all" "private" "localgov" "stategov" "federalgov" 
-#' @param ByNAICS Boolean, A boolean value that takes the value of "TRUE" if you need to obtain break-down table 
-#' @return A list of data frames containing data asked for at a specific year.
-#' @details NOT IN USE, ABANDONED
-GetGAEmploymentData = function(year, ownership, ByNAICS) {
-  switch_own = switch(ownership, "all" = c("0","1","2","3","5"), "private" = "5", "localgov" = "3", "stategov" = "2", "federalgov" = "1")
-  #aggregated table
-  filename = paste0("../data/extdata/QCEW_GA_Emp/GA_Emp_", paste0(year, ".csv"))
-  GAtotal = read_csv(filename) %>% 
-    filter(industry_code == '10', own_code %in% switch_own) %>%
-    select(area_fips, own_code, year, annual_avg_estabs, annual_avg_emplvl, total_annual_wages)
-  if(!ByNAICS) {
-    return(as.data.frame(GAtotal))
-  } else {
-    #refilter for breakdown table
-    GA_NAICS = read_csv(filename) %>% 
-      filter(as.numeric(industry_code) / 10 ^ 6 <= 1, as.numeric(industry_code) / 10 ^ 6 >= 0.11) %>%
-      select(area_fips, own_code, year, industry_code, annual_avg_estabs, annual_avg_emplvl, total_annual_wages)
-    
-    #adjusted for NA: smoothing under same ownership codes
-    for (code in unique(GA_NAICS$own_code)) {
-      codetable = GA_NAICS %>% filter(own_code == code, annual_avg_estabs != 0, total_annual_wages != 0)
-      avgCompPerEstab = sum(codetable$total_annual_wages) / sum(codetable$annual_avg_estabs)
-      CompDif = as.numeric(GAtotal[GAtotal$own_code == code, 'total_annual_wages'] - sum(codetable$total_annual_wages))
-      ToBeAdj = GA_NAICS %>% filter(own_code == code, annual_avg_estabs != 0, total_annual_wages == 0)
-      TotalEstab = sum(ToBeAdj$annual_avg_estabs)
-      for (ind in ToBeAdj$industry_code) {
-        position = which(GA_NAICS$own_code == code)[which(GA_NAICS$own_code == code) %in% which(GA_NAICS$industry_code == ind)]
-        GA_NAICS$total_annual_wages[position] = GA_NAICS$annual_avg_estabs[position] / TotalEstab * CompDif
-      }
-    }
-        
-  }
-    return(GA_NAICS %>% filter(own_code %in% switch_own))
-}
-
-#' Get county-level employment data
+#' GetGeorgiaEmploymentData
+#' 
+#' This function is to return dataframes containing Georgia employement data from
+#' the year of 2015 to 2018, during which QCEW data is available. There are five types 
+#' of employment data returned: employment count, emp compensation, and establishment counts,
+#' average employment per estab, and average comp per estab.
+#' 
+#' 
 #' @param year Integer, A numeric value between 2015-2018 specifying the year of interest
-#' @param type Character, types of employment data,  'emp', 'comp' 'estabs'
 #' @return A data frame containing data asked for at a specific year.
-GetCountyEmploymentData = function(year, type) {
-  NAICS2 = c('11','21','22','23','31-33','42','44-45','48-49','51','52','53','54','55','56','61','62','71','72','81', '92')
-  GAcountyFIPS = getGACountyFIPS() 
-  CountyTable = data.frame() %>% rbind(as.data.frame(NAICS2))
+GetGeorgiaEmploymentData = function(year) {
   
-  # compute GA empPerEstab Ratio and CompPerEstab Ratio for filling NA
   GAlevel = readr::read_csv(paste0("../data/extdata/QCEW_County_Emp/", paste0(year,"/13000.csv"))) %>% 
     filter(industry_code %in% NAICS2) %>% 
     select(area_fips, own_code, industry_code, year, annual_avg_estabs, annual_avg_emplvl, total_annual_wages) %>%
     filter(annual_avg_emplvl != total_annual_wages) %>%
     group_by(industry_code) %>%
     summarise(estabs = sum(annual_avg_estabs), emp = sum(annual_avg_emplvl), comp = sum(total_annual_wages), empPerEstab = emp / estabs, compPerEstab = comp / estabs)
+  
+  return(GAlevel)
+}
+
+
+
+#' GetCountyEmploymentData
+#' 
+#' This function is to return dataframes containing county-level employement data from
+#' the year of 2015 to 2018, during which QCEW data is available. There are three types 
+#' of employment data returned: employment count, emp compensation, and establishment counts,
+#' among which emp count and emp compensation 
+#' 
+#' 
+#' @param year Integer, A numeric value between 2015-2018 specifying the year of interest
+#' @param type Character, types of employment data,  'emp', 'comp' 'estabs'
+#' @return A data frame containing data asked for at a specific year.
+GetCountyEmploymentData = function(year, type) {
+
+  # preparation
+  GAlevel = GetGeorgiaEmploymentData(year) # call GA emp data
+  NAICS2 = GAlevel$industry_code # industry codes
+  GAcountyFIPS = getGACountyFIPS() %>% arrange(Name) # county fips
+  CountyTable = data.frame() %>% rbind(as.data.frame(NAICS2)) # blank df
   
   # loop through all counties in GA
   for (fips in unique(GAcountyFIPS$fips)) {
@@ -133,7 +112,11 @@ GetCountyEmploymentData = function(year, type) {
 }
 
 
+#' ComputeEstabLocationQuotient
+#' 
 #' Get county-level estab data at BEA summary level: an update of GetCountyEmploymentData
+#' 
+#' 
 #' @param year Integer, A numeric value between 2015-2018 specifying the year of interest
 #' @return A data frame containing data asked for at a specific year.
 ComputeEstabLocationQuotient = function(year) {
