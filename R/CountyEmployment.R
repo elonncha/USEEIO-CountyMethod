@@ -1,7 +1,7 @@
 library(tidyverse)
 source('CrosswalkGenerator.R')
 source('supporter.R')
-
+source('../../stateio/R/UtilityFunctions.R')
 #' GetGeorgiaEmploymentData
 #' 
 #' This function is to return dataframes containing Georgia employement data from
@@ -76,7 +76,10 @@ EstimateCountyEmploymentData = function(year, type) {
   GAlevel = GetGeorgiaEmploymentData(year) # call GA emp data
   NAICS2 = GAlevel$industry_code # industry codes
   GAcountyFIPS = getGACountyFIPS() %>% arrange(Name) # county fips
+  Countytotal = raw %>% filter(own_code ==0) %>% left_join(., GAcountyFIPS, by = c('area_fips' = 'fips')) %>% arrange(Name) #call caounty total data
   CountyTable = data.frame() %>% rbind(as.data.frame(NAICS2)) # blank df
+  
+  
   
   ### ESTABLISHMENT 
   if (type == 'estabs') { # no estimation needed，true value output
@@ -97,60 +100,69 @@ EstimateCountyEmploymentData = function(year, type) {
   ##readr::write_csv(output, filename)
   
 
-  
   ### EMPLOYMENT/EMP COMP 
-  
-
+  if (type %in% c('emp','comp')) { 
+    empcompTable = raw %>% 
+      select(area_fips, industry_code, annual_avg_estabs, annual_avg_emplvl, total_annual_wages) %>%
+      filter(industry_code %in% NAICS2) %>% left_join(., GAlevel, by = 'industry_code')
     
-    if (type %in% c('emp','comp')) { # estimation needed, partially estimated value output
-      key = which(countydetail$annual_avg_emplvl == countydetail$total_annual_wages)
-      Table = countydetail %>% 
-        select(area_fips, own_code, industry_code, annual_avg_emplvl, total_annual_wages, annual_avg_estabs) %>%
-        rename(emp = annual_avg_emplvl, comp = total_annual_wages, estab = annual_avg_estabs)
-      ## Step1: substitute NA with estimated value
-      for (i in key) {
-        Table$emp[i] = round(Table$estab[i] * GAlevel$empPerEstab[GAlevel$industry_code == Table$industry_code[i]],0)
-        Table$comp[i] = round(Table$estab[i] * GAlevel$compPerEstab[GAlevel$industry_code == Table$industry_code[i]],0)
-      }
-      ## Step2: verify the difference between est sum and true sum and apply adjust factor 
-      estEmpSum = sum(Table$emp)
-      estCompSum = sum(Table$comp)
-      trueEmpSum = countytotal$annual_avg_emplvl
-      trueCompSum = countytotal$total_annual_wages
-      EmpDif = estEmpSum - trueEmpSum
-      CompDif = estCompSum - trueCompSum
-      
-      EmpAdjFactor = 1 - EmpDif / sum(Table$emp[key])
-      CompAdjFactor = 1 - CompDif / sum(Table$comp[key])
-      for (i in key) {
-        Table$emp[i] = round(Table$emp[i] * EmpAdjFactor, 0)
-        Table$comp[i] = round(Table$comp[i] * CompAdjFactor ,0)
-      }
-      
-      if (type == 'emp') {
-        empTable = Table %>% 
-          group_by(industry_code) %>% 
-          summarise(totalemp = sum(emp)) %>% 
-          right_join(as.data.frame(NAICS2), by = c('industry_code'='NAICS2')) 
-        empTable[as.vector(is.na(empTable[,2])),2] = 0
-        colnames(empTable)[2] = paste0('FIPS/', paste0(fips,paste0("/", GAcountyFIPS[GAcountyFIPS$fips == fips,2])))
-        CountyTable = CountyTable %>% left_join(., empTable, by = c('NAICS2' = 'industry_code'))
-      } else {
-        compTable = Table %>% 
-          group_by(industry_code) %>% 
-          summarise(totalcomp = sum(comp)) %>% 
-          right_join(as.data.frame(NAICS2), by = c('industry_code'='NAICS2')) 
-        compTable[as.vector(is.na(compTable[,2])),2] = 0
-        colnames(compTable)[2] = paste0('FIPS/', paste0(fips,paste0("/", GAcountyFIPS[GAcountyFIPS$fips == fips,2])))
-        CountyTable = CountyTable %>% left_join(., compTable, by = c('NAICS2' = 'industry_code'))
-      }
-    }
+    # Step1: use state average to fill in NAs
+    filter = which(empcompTable$annual_avg_emplvl == 0) # find non-zero estab with zero emp and comp
+    empcompTable$annual_avg_emplvl[filter] = empcompTable$annual_avg_estabs[filter] * empcompTable$empPerEstab[filter]
+    empcompTable$total_annual_wages[filter] = empcompTable$annual_avg_estabs[filter] * empcompTable$compPerEstab[filter]
+    empcompTable$isEst = 0
+    empcompTable$isEst[filter] = 1
+    
+    step1table = empcompTable %>% 
+      group_by(area_fips, industry_code) %>%
+      summarise(estabs = sum(annual_avg_estabs), empEST = sum(annual_avg_emplvl), compEST = sum(total_annual_wages), isEST = sum(isEst) ) %>% left_join(., GAcountyFIPS, by = c('area_fips' = 'fips')) %>%
+      mutate(Name = paste0(Name, paste0('/',area_fips))) %>%
+      rename(NAICS2 = industry_code) %>% arrange(Name)
+    
+  }
   
-  return(CountyTable)
+  # Step2: RAS
+  if (type == 'emp') {
+    # divide original data into two matrices: true matrix containing with all NA equal 0 and adjuested matrix with all true value equal 0
+    empstep1ADJ = step1table[step1table$isEST != 0, c(2,4,7)] %>% arrange(Name) %>% spread(Name, empEST)
+    empstep1ADJ[is.na(empstep1ADJ)] = 0
+    step1table$empEST[step1table$isEST != 0] = 0
+    empstep1TRUE = step1table[, c(2,4,7)] %>% arrange(Name) %>% spread(Name, empEST)
+    empstep1TRUE[is.na(empstep1TRUE)] = 0
+    
+    # apply RAS method
+    M0 = as.matrix(empstep1ADJ %>% select(-1))
+    rowDifference = GAlevel$emp - rowSums(empstep1TRUE %>% select(-1))
+    colDifference = Countytotal$annual_avg_emplvl - colSums(empstep1TRUE %>% select(-1))
+    M1 = applyRAS(M0, rowDifference, colDifference, relative_diff = NULL, absolute_diff = 100, max_itr = 10000)
+    
+    # add back and get final output
+    output = cbind(empstep1TRUE[,1],round(empstep1TRUE[,2:160] + M1,0))
+    
+    return(output)
+  }
+  
+  if (type == 'comp') {
+    # divide original data into two matrices: true matrix containing with all NA equal 0 and adjuested matrix with all true value equal 0
+    compstep1ADJ = step1table[step1table$isEST != 0, c(2,5,7)] %>% arrange(Name) %>% spread(Name, compEST)
+    compstep1ADJ[is.na(compstep1ADJ)] = 0
+    step1table$compEST[step1table$isEST != 0] = 0
+    compstep1TRUE = step1table[, c(2,5,7)] %>% arrange(Name) %>% spread(Name, compEST)
+    compstep1TRUE[is.na(compstep1TRUE)] = 0
+    
+    # apply RAS method
+    M0 = as.matrix(compstep1ADJ %>% select(-1))
+    rowDifference = GAlevel$comp - rowSums(compstep1TRUE %>% select(-1))
+    colDifference = Countytotal$total_annual_wages - colSums(compstep1TRUE %>% select(-1))
+    M1 = applyRAS(M0, rowDifference, colDifference, relative_diff = NULL, absolute_diff = 100, max_itr = 100000)
+    
+    # add back and get final output
+    output = cbind(compstep1TRUE[,1],round(compstep1TRUE[,2:160] + M1,0))
+    
+    return(output)
+  }
+  
 }
-
-
-
 
 
 
