@@ -28,42 +28,81 @@ GetGeorgiaEmploymentData = function(year) {
 
 #' GetCountyEmploymentData
 #' 
+#' This function is to return dataframes binding employement data of each county from
+#' the year of 2015 to 2018, during which QCEW data is available, into one data frame. 
+#' 
+#' 
+#' @param year Integer, A numeric value between 2015-2018 specifying the year of interest
+#' @return A data frame containing data asked for at a specific year.
+#' @export GACounty_Emp_Raw_xxxx.csv
+GetCountyEmploymentData = function(year) {
+  GAcountyFIPS = getGACountyFIPS() %>% arrange(Name) # county fips
+  allcounty = data.frame() # blank data frame
+  
+  for (fips in unique(GAcountyFIPS$fips)) {
+    filename = paste0(GAcountyFIPS[GAcountyFIPS$fips == fips,]$Name,paste0(year,'.csv'))
+    url = paste0('../data/extdata/QCEW_County_Emp/', paste0(paste0(year,"/"), filename))
+    countyraw = readr::read_csv(url) 
+    countytotal = countyraw %>% filter(own_code == '0') %>% select(area_fips, own_code, industry_code, year, annual_avg_estabs, annual_avg_emplvl, total_annual_wages) 
+    countydetail = countyraw %>% 
+      select(area_fips, own_code, industry_code, year, annual_avg_estabs, annual_avg_emplvl, total_annual_wages) %>%
+      filter(own_code %in% c("1","2","3","5"), industry_code %in% NAICS2) %>% rbind(., countytotal)
+    allcounty = rbind(allcounty, countydetail)
+  }
+  ##filename = paste0('../data/GACounty_Emp_Raw_', paste0(year,'.csv'))
+  ##readr::write_csv(allcounty, filename)
+  return(allcounty)
+}
+
+
+
+#' EstimateCountyEmploymentData
+#' 
 #' This function is to return dataframes containing county-level employement data from
-#' the year of 2015 to 2018, during which QCEW data is available. There are three types 
-#' of employment data returned: employment count, emp compensation, and establishment counts,
-#' among which emp count and emp compensation 
+#' the year of 2015 to 2018, during which QCEW data is available, using the export from 
+#' GetCountyEmployment Data. There are three types of employment data returned: employment count, 
+#' emp compensation, and establishment counts, among which emp count and emp compensation.
 #' 
 #' 
 #' @param year Integer, A numeric value between 2015-2018 specifying the year of interest
 #' @param type Character, types of employment data,  'emp', 'comp' 'estabs'
 #' @return A data frame containing data asked for at a specific year.
-GetCountyEmploymentData = function(year, type) {
-
+#' @export GACounty_Emp/estabs/Comp_xxxx.csv
+EstimateCountyEmploymentData = function(year, type) {
+  
   # preparation
+  filename = paste0('../data/GACounty_Emp_Raw_', paste0(year,'.csv')) #export from GetCountyEmploymentData
+  raw = readr::read_csv(filename) # raw county-lvl data
   GAlevel = GetGeorgiaEmploymentData(year) # call GA emp data
   NAICS2 = GAlevel$industry_code # industry codes
   GAcountyFIPS = getGACountyFIPS() %>% arrange(Name) # county fips
   CountyTable = data.frame() %>% rbind(as.data.frame(NAICS2)) # blank df
   
-  # loop through all counties in GA
-  for (fips in unique(GAcountyFIPS$fips)) {
-    filename = paste0(GAcountyFIPS[GAcountyFIPS$fips == fips,]$Name,paste0(year,'.csv'))
-    url = paste0('../data/extdata/QCEW_County_Emp/', paste0(paste0(year,"/"), filename))
-    countyraw = readr::read_csv(url) 
-    countytotal = countyraw %>% filter(own_code == '0') %>% select(annual_avg_estabs, annual_avg_emplvl, total_annual_wages) 
-    countydetail = countyraw %>% 
-      select(area_fips, own_code, industry_code, year, annual_avg_estabs, annual_avg_emplvl, total_annual_wages) %>%
-      filter(own_code %in% c("1","2","3","5"), industry_code %in% NAICS2) 
+  ### ESTABLISHMENT 
+  if (type == 'estabs') { # no estimation needed，true value output
+    estabsTable = raw %>% 
+      select(area_fips, industry_code, annual_avg_estabs) %>%
+      filter(industry_code %in% NAICS2) %>%
+      group_by(area_fips, industry_code) %>%
+      summarise(estabs = sum(annual_avg_estabs)) %>% left_join(., GAcountyFIPS, by = c('area_fips' = 'fips')) %>%
+      mutate(Name = paste0(Name, paste0('/',area_fips))) %>%
+      rename(NAICS2 = industry_code)
     
-    if (type == 'estabs') { # no estimation needed
-      estabsTable = temp %>% group_by(industry_code) %>% summarise(estabs = sum(annual_avg_estabs))
-      colnames(estabsTable)[2] = paste0('FIPS/', paste0(fips,paste0("/", GAcountyFIPS[GAcountyFIPS$fips == fips,2])))
-      estabsTable = estabsTable %>% right_join(as.data.frame(NAICS2), by = c('industry_code'='NAICS2')) 
-      estabsTable[as.vector(is.na(estabsTable[,2])),2] = 0
-      CountyTable = CountyTable %>% left_join(., estabsTable, by = c('NAICS2' = 'industry_code'))
-    }
+    output = estabsTable[,c(2,3,4)] %>% arrange(Name) %>% spread(Name, estabs) #spread rows to columns
+    output[is.na(output)] = 0  #set NA to 0 (no data loss here since NA appears when there is 0 estab in one industry of a county)
     
-    if (type %in% c('emp','comp')) { # estimation needed
+    return(output)
+  }
+  ##filename = paste0('../data/GACounty_estabs_', paste0(year,'.csv'))
+  ##readr::write_csv(output, filename)
+  
+
+  
+  ### EMPLOYMENT/EMP COMP 
+  
+
+    
+    if (type %in% c('emp','comp')) { # estimation needed, partially estimated value output
       key = which(countydetail$annual_avg_emplvl == countydetail$total_annual_wages)
       Table = countydetail %>% 
         select(area_fips, own_code, industry_code, annual_avg_emplvl, total_annual_wages, annual_avg_estabs) %>%
@@ -106,10 +145,13 @@ GetCountyEmploymentData = function(year, type) {
         CountyTable = CountyTable %>% left_join(., compTable, by = c('NAICS2' = 'industry_code'))
       }
     }
-  }
   
   return(CountyTable)
 }
+
+
+
+
 
 
 #' ComputeEstabLocationQuotient

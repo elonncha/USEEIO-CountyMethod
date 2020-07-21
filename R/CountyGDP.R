@@ -68,7 +68,6 @@ EstimateCountySectorGDP = function(year) {
   cw = readr::read_csv('../data/extdata/CrossWalk_NAICS2ToLineCode.csv')
   filename = paste0("../data/GACounty_estabs_", paste0(year,'.csv'))
   CountyEstabCount = readr::read_csv(filename) %>% 
-    select(-1) %>%
     right_join(., cw, by = 'NAICS2') %>% 
     relocate(LineCode,.after = NAICS2) %>% 
     group_by(LineCode) %>%
