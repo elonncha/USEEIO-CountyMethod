@@ -226,12 +226,11 @@ EstimateCountySummaryGDP = function(year, iteration = 1000) {
 }
 
 
-
-for (year in seq(2015,2017,1)) {
-  filename = paste0("../data/GACounty_SummaryGDP_", paste0(year,'.csv'))
-  gdp = EstimateCountySummaryGDP(year, iteration = 1000)
-  write_csv(gdp, filename)
-}
+#for (year in seq(2015,2017,1)) {
+  #filename = paste0("../data/GACounty_SummaryGDP_", paste0(year,'.csv'))
+  #gdp = EstimateCountySummaryGDP(year, iteration = 1000)
+  #write_csv(gdp, filename)
+#}
 
 
 

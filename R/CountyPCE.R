@@ -3,7 +3,11 @@ if (!require(tidyverse)) { install.packages(tidyverse) }
 library(useeior)
 library(tidyverse)
 
+#' GetCountyPCERatio
+#' 
 #' Get county Personal Expenditure Ratio by using county personal income data
+#' 
+#' 
 #' @param year A numeric value between 2001 and 2018 specifying the year of interest.
 #' @return A data frame contains county Personal Expenditure Ratio at a specific year.
 GetCountyPCERatio = function(year) {
