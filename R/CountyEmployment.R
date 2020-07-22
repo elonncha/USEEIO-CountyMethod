@@ -168,11 +168,12 @@ EstimateCountyEmploymentData = function(year, type) {
 
 #' ComputeEstabLocationQuotient
 #' 
-#' Get county-level estab data at BEA summary level: an update of GetCountyEmploymentData
+#' Compute Establishment count LQ for each industry of each county
 #' 
 #' 
 #' @param year Integer, A numeric value between 2015-2018 specifying the year of interest
 #' @return A data frame containing data asked for at a specific year.
+#' @export GACounty_SummaryEstabsLQ_xxxx.csv
 ComputeEstabLocationQuotient = function(year) {
   CW = getCrosswalk('bea_summary','naics')
   colnames(CW) = c('BEA','BEA_DES','NAICS','NAICS_DES')
@@ -224,3 +225,11 @@ ComputeEstabLocationQuotient = function(year) {
     
   return(CountyLQ)
 }
+
+
+#for (year in seq(2016,2018,1)) {
+#filename = paste0("../data/GACounty_SummaryEstabsLQ_", paste0(year,'.csv'))
+#lq = ComputeEstabLocationQuotient(year)
+#write_csv(lq, filename)
+#}
+
