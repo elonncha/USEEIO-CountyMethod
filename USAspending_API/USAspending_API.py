@@ -45,7 +45,6 @@ stateCode = stateTable['Code']
 PSCCODE IMPORT (BASED ON DAVE'S LIST)
 '''
 pscTable = pd.read_csv('PSC_Classification2.csv', encoding = 'unicode_escape')
-demandType = np.unique(pscTable['Final_Demand_Category'].dropna())
 pscIntermediate, pscEquip, pscIP, pscStructure = pscTable[pscTable['Purchase_Type'] == 'Intermediate'], \
                                                  pscTable[pscTable['Final_Demand_Category'] == 'Equipment'], \
                                                  pscTable[pscTable['Final_Demand_Category'] == 'Intellectual_Property'], \
@@ -125,11 +124,11 @@ def USASpending_search_by_award(PSCObject):
 OUTPUT
 '''
 df_ip = USASpending_search_by_award(psclist_ip)
-df_ip.to_csv('.../output/fedspending_ip.csv')
+df_ip.to_csv('../output/fedspending_ip.csv')
 
 df_structure = USASpending_search_by_award(psclist_structure)
-df_structure.to_csv('.../output/fedspending_structure.csv')
+df_structure.to_csv('../output/fedspending_structure.csv')
 
 df_equip = USASpending_search_by_award(psclist_equip)
-df_equip.to_csv('.../output/fedspending_equipment_0724.csv')
+df_equip.to_csv('../output/fedspending_equipment_0724.csv')
 
