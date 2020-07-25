@@ -125,11 +125,11 @@ def USASpending_search_by_award(PSCObject):
 OUTPUT
 '''
 df_ip = USASpending_search_by_award(psclist_ip)
-df_ip.to_csv('fedspending_ip.csv')
+df_ip.to_csv('.../output/fedspending_ip.csv')
 
 df_structure = USASpending_search_by_award(psclist_structure)
-df_structure.to_csv('fedspending_structure.csv')
+df_structure.to_csv('.../output/fedspending_structure.csv')
 
 df_equip = USASpending_search_by_award(psclist_equip)
-df_equip.to_csv('fedspending_equipment.csv')
+df_equip.to_csv('.../output/fedspending_equipment_0724.csv')
 
